@@ -9,26 +9,21 @@ class VideoAssemblyError(Exception):
 
 
 def resize_to_vertical(clip, width: int = VIDEO_WIDTH, height: int = VIDEO_HEIGHT):
-    from moviepy.editor import VideoFileClip
-    import moviepy.video.fx.all as vfx
+    """클립을 9:16 수직 포맷(720x1280)으로 리사이즈 + center-crop"""
+    import moviepy.video.fx as vfx
 
     clip_w, clip_h = clip.size
-
-    # scale so the clip fills the target dimensions (cover strategy)
     scale_w = width / clip_w
     scale_h = height / clip_h
     scale = max(scale_w, scale_h)
 
     new_w = int(clip_w * scale)
     new_h = int(clip_h * scale)
-    resized = clip.resize((new_w, new_h))
 
-    # center crop
-    x_center = new_w / 2
-    y_center = new_h / 2
-    cropped = resized.crop(
-        x_center=x_center,
-        y_center=y_center,
+    resized = clip.with_effects([vfx.Resize((new_w, new_h))])
+    cropped = resized.cropped(
+        x_center=new_w / 2,
+        y_center=new_h / 2,
         width=width,
         height=height,
     )
@@ -36,13 +31,12 @@ def resize_to_vertical(clip, width: int = VIDEO_WIDTH, height: int = VIDEO_HEIGH
 
 
 def _trim_or_loop(clip, target_duration: float):
+    """클립을 target_duration에 맞게 자르거나 반복"""
+    import moviepy.video.fx as vfx
+
     if clip.duration >= target_duration:
-        return clip.subclip(0, target_duration)
-    # loop to fill duration
-    loops = int(target_duration / clip.duration) + 1
-    from moviepy.editor import concatenate_videoclips
-    looped = concatenate_videoclips([clip] * loops)
-    return looped.subclip(0, target_duration)
+        return clip.subclipped(0, target_duration)
+    return clip.with_effects([vfx.Loop(duration=target_duration)])
 
 
 def assemble_video(
@@ -53,7 +47,8 @@ def assemble_video(
     transition_style: str = "crossfade",
     fps: int = VIDEO_FPS,
 ) -> str:
-    from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_videoclips, CompositeVideoClip
+    from moviepy import VideoFileClip, AudioFileClip, concatenate_videoclips
+    import moviepy.video.fx as vfx
 
     if len(clip_paths) != len(scenes):
         raise VideoAssemblyError("입력 검증", f"클립 수({len(clip_paths)})와 장면 수({len(scenes)}) 불일치")
@@ -74,8 +69,9 @@ def assemble_video(
         fade_dur = min(0.5, min(c.duration for c in processed_clips) / 4)
         faded = []
         for i, clip in enumerate(processed_clips):
-            c = clip.crossfadein(fade_dur) if i > 0 else clip
-            faded.append(c)
+            if i > 0:
+                clip = clip.with_effects([vfx.CrossFadeIn(fade_dur)])
+            faded.append(clip)
         video = concatenate_videoclips(faded, method="compose", padding=-fade_dur)
     else:
         video = concatenate_videoclips(processed_clips, method="compose")
@@ -83,9 +79,9 @@ def assemble_video(
     print("  [영상] 오디오 합성 중...")
     audio = AudioFileClip(audio_path)
     final_duration = min(video.duration, audio.duration)
-    video = video.subclip(0, final_duration)
-    audio = audio.subclip(0, final_duration)
-    video = video.set_audio(audio)
+    video = video.subclipped(0, final_duration)
+    audio = audio.subclipped(0, final_duration)
+    video = video.with_audio(audio)
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     print(f"  [영상] 렌더링 중: {output_path}")
