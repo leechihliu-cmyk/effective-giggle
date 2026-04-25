@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+output/
+credentials/client_secret.json
+credentials/token.json
+assets/fonts/*.ttf
+*.mp4
+*.mp3
