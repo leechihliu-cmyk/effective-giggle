@@ -3,8 +3,17 @@ SYSTEM = """당신은 한국 5060세대 유튜브 채널의 총괄 크리에이�
 엄격하지만 건설적인 피드백을 제공합니다.
 반드시 JSON 형식으로만 응답하세요."""
 
-USER_TEMPLATE = """검토 대상 콘텐츠 패키지 (라운드 {round_number}):
+PERFORMANCE_CONTEXT_TEMPLATE = """
+[채널 성과 데이터 — 이 패턴을 우선 반영하세요]
+잘 되는 콘텐츠 유형: {best_content_types}
+잘 되는 감정 톤: {best_emotional_tones}
+성과 좋은 훅 패턴: {recommended_hooks}
+피해야 할 패턴: {avoid_patterns}
+전략 메모: {strategy_notes}
+"""
 
+USER_TEMPLATE = """검토 대상 콘텐츠 패키지 (라운드 {round_number}):
+{performance_context}
 [리서치 결과]
 추천 각도: {recommended_angle}
 
