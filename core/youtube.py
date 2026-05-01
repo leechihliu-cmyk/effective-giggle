@@ -26,7 +26,18 @@ def get_authenticated_service(client_secrets_file: str):
             creds.refresh(Request())
         else:
             flow = InstalledAppFlow.from_client_secrets_file(client_secrets_file, SCOPES)
-            creds = flow.run_local_server(port=8080, open_browser=False)
+            flow.redirect_uri = "http://localhost:8080/"
+            auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline")
+            print("\n" + "=" * 60)
+            print("아래 URL을 브라우저에서 열고 Google 계정으로 허용하세요:")
+            print(auth_url)
+            print("=" * 60)
+            print("\n허용 후 브라우저가 localhost:8080 으로 이동하면서")
+            print("연결 실패 화면이 뜰 수 있습니다. 괜찮습니다.")
+            print("그 화면의 주소창 URL 전체를 복사해서 아래에 붙여넣으세요.\n")
+            redirect_response = input("리다이렉트 URL 붙여넣기: ").strip()
+            flow.fetch_token(authorization_response=redirect_response)
+            creds = flow.credentials
         Path(token_path).write_text(creds.to_json())
 
     return googleapiclient.discovery.build("youtube", "v3", credentials=creds)
