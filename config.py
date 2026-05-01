@@ -7,10 +7,9 @@ load_dotenv()
 
 REQUIRED_ENV_VARS = [
     "ANTHROPIC_API_KEY",
-    "ELEVENLABS_API_KEY",
-    "ELEVENLABS_VOICE_ID",
     "PEXELS_API_KEY",
 ]
+# ElevenLabs는 선택 — 없으면 gTTS(Google 무료)로 자동 대체
 
 CLAUDE_MODEL = "claude-sonnet-4-6"
 
