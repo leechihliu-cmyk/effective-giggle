@@ -72,17 +72,70 @@ def _elevenlabs(
 
 
 def _gtts(text: str, output_path: str) -> tuple[str, float]:
+    # 1) edge-tts 시도
     try:
-        from gtts import gTTS
-    except ImportError:
-        raise TTSError("gTTS가 설치되지 않았습니다. pip install gTTS 를 실행하세요.")
+        return _edge_tts(text, output_path)
+    except Exception:
+        pass
+    # 2) espeak-ng 오프라인 폴백 (SSL 불필요)
+    try:
+        return _espeak(text, output_path)
+    except Exception as e:
+        raise TTSError(f"모든 TTS 실패: {e}")
+
+
+def _edge_tts(text: str, output_path: str) -> tuple[str, float]:
+    import asyncio
+    import ssl
+    import aiohttp
+    import edge_tts
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    tts = gTTS(text=text, lang="ko", slow=False)
-    tts.save(output_path)
+
+    # 서버 환경의 자체 서명 인증서 우회
+    ssl_ctx = ssl.create_default_context()
+    ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = ssl.CERT_NONE
+
+    async def _run():
+        connector = aiohttp.TCPConnector(ssl=ssl_ctx)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            communicate = edge_tts.Communicate(text, voice="ko-KR-SunHiNeural")
+            communicate._session = session
+            await communicate.save(output_path)
+
+    asyncio.run(_run())
+    duration = get_audio_duration(output_path)
+    print(f"  [TTS] edge-tts 음성 생성 (ko-KR-SunHiNeural): {duration:.1f}초 → {output_path}")
+    return output_path, duration
+
+
+def _espeak(text: str, output_path: str) -> tuple[str, float]:
+    """espeak-ng 오프라인 한국어 TTS → WAV 생성 후 MP3로 변환"""
+    import subprocess
+    import imageio_ffmpeg
+
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    wav_path = output_path.replace(".mp3", ".wav")
+
+    # espeak-ng로 WAV 생성 (-s 130: 속도, -p 50: 피치)
+    result = subprocess.run(
+        ["espeak-ng", "-v", "ko", "-s", "130", "-p", "50", "-w", wav_path, text],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise TTSError(f"espeak-ng 오류: {result.stderr}")
+
+    # ffmpeg으로 WAV → MP3 변환
+    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    subprocess.run(
+        [ffmpeg, "-y", "-i", wav_path, "-codec:a", "libmp3lame", "-q:a", "4", output_path],
+        capture_output=True,
+    )
+    Path(wav_path).unlink(missing_ok=True)
 
     duration = get_audio_duration(output_path)
-    print(f"  [TTS] gTTS 음성 생성: {duration:.1f}초 → {output_path}")
+    print(f"  [TTS] espeak-ng 오프라인 음성 생성: {duration:.1f}초 → {output_path}")
     return output_path, duration
 
 

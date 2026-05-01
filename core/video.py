@@ -91,7 +91,6 @@ def assemble_video(
         codec="libx264",
         audio_codec="aac",
         logger=None,
-        verbose=False,
     )
 
     for clip in processed_clips:

@@ -120,7 +120,6 @@ def burn_subtitles(
         codec="libx264",
         audio_codec="aac",
         logger=None,
-        verbose=False,
     )
     video.close()
     processed.close()

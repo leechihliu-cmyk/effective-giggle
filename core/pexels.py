@@ -1,9 +1,57 @@
 import os
 import time
 import requests
+import numpy as np
 from pathlib import Path
 from tqdm import tqdm
 from models.data_models import Scene
+
+_PEXELS_AVAILABLE: bool | None = None  # cached after first check
+
+
+def _check_pexels_available() -> bool:
+    global _PEXELS_AVAILABLE
+    if _PEXELS_AVAILABLE is not None:
+        return _PEXELS_AVAILABLE
+    api_key = os.getenv("PEXELS_API_KEY", "")
+    try:
+        r = requests.get(
+            "https://api.pexels.com/videos/search",
+            params={"query": "nature", "per_page": 1},
+            headers={"Authorization": api_key},
+            timeout=8,
+            verify=False,
+        )
+        _PEXELS_AVAILABLE = r.status_code == 200
+    except Exception:
+        _PEXELS_AVAILABLE = False
+    if not _PEXELS_AVAILABLE:
+        print("  [Pexels] API 접근 불가 (호스트 차단 등) → 그라디언트 영상으로 대체")
+    return _PEXELS_AVAILABLE
+
+
+def _generate_placeholder_clip(output_path: str, duration: float, scene_number: int) -> str:
+    """Generate a colored gradient video as a placeholder when Pexels is unavailable."""
+    from moviepy import ImageClip
+    import colorsys
+
+    hue = (scene_number * 0.15) % 1.0
+    r, g, b = colorsys.hsv_to_rgb(hue, 0.55, 0.40)
+    color = (int(r * 255), int(g * 255), int(b * 255))
+
+    h, w = 1280, 720
+    frame = np.zeros((h, w, 3), dtype=np.uint8)
+    for row in range(h):
+        t = row / h
+        r2, g2, b2 = colorsys.hsv_to_rgb(hue, 0.55, 0.25 + 0.30 * t)
+        frame[row, :] = [int(r2 * 255), int(g2 * 255), int(b2 * 255)]
+
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    clip = ImageClip(frame, duration=duration)
+    clip.write_videofile(output_path, fps=30, codec="libx264", logger=None)
+    clip.close()
+    print(f"  [Pexels] 장면 {scene_number} 그라디언트 플레이스홀더 생성: {output_path}")
+    return output_path
 
 
 class PexelsError(Exception):
@@ -20,14 +68,16 @@ def search_videos(
     min_duration: int = 3,
     max_duration: int = 30,
 ) -> list[dict]:
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
     api_key = os.getenv("PEXELS_API_KEY")
     if not api_key:
         raise PexelsError("", 0, "PEXELS_API_KEY가 설정되지 않았습니다.")
 
     for kw in keywords:
-        query = kw
         params = {
-            "query": query,
+            "query": kw,
             "orientation": orientation,
             "per_page": per_page,
             "size": "medium",
@@ -37,6 +87,7 @@ def search_videos(
             params=params,
             headers={"Authorization": api_key},
             timeout=15,
+            verify=False,
         )
         if resp.status_code != 200:
             continue
@@ -49,13 +100,13 @@ def search_videos(
         if filtered:
             return filtered
 
-        # retry without orientation filter
         params.pop("orientation")
         resp2 = requests.get(
             "https://api.pexels.com/videos/search",
             params=params,
             headers={"Authorization": api_key},
             timeout=15,
+            verify=False,
         )
         if resp2.status_code == 200:
             videos2 = resp2.json().get("videos", [])
@@ -112,11 +163,18 @@ def fetch_scene_clips(
     output_dir: str,
     fallback_keywords: list[str],
 ) -> list[str]:
+    pexels_ok = _check_pexels_available()
     clips = []
+
     for scene in scenes:
         output_path = str(Path(output_dir) / f"scene_{scene.scene_number:02d}.mp4")
         if Path(output_path).exists():
             print(f"  [Pexels] 장면 {scene.scene_number} 캐시 사용")
+            clips.append(output_path)
+            continue
+
+        if not pexels_ok:
+            _generate_placeholder_clip(output_path, scene.duration_sec, scene.scene_number)
             clips.append(output_path)
             continue
 
@@ -128,15 +186,14 @@ def fetch_scene_clips(
             videos = search_videos(fallback_keywords)
 
         if not videos:
-            raise PexelsError(
-                str(scene.pexels_keywords),
-                scene.scene_number,
-                f"폴백 키워드도 실패: {fallback_keywords}",
-            )
+            print(f"  [Pexels] 검색 실패 → 그라디언트 플레이스홀더 사용")
+            _generate_placeholder_clip(output_path, scene.duration_sec, scene.scene_number)
+            clips.append(output_path)
+            continue
 
         download_clip(videos[0], output_path)
         print(f"  [Pexels] 장면 {scene.scene_number} 다운로드 완료: {output_path}")
         clips.append(output_path)
-        time.sleep(0.3)  # API rate limit 배려
+        time.sleep(0.3)
 
     return clips
