@@ -26,7 +26,7 @@ def get_authenticated_service(client_secrets_file: str):
             creds.refresh(Request())
         else:
             flow = InstalledAppFlow.from_client_secrets_file(client_secrets_file, SCOPES)
-            creds = flow.run_local_server(port=0)
+            creds = flow.run_local_server(port=8080, open_browser=False)
         Path(token_path).write_text(creds.to_json())
 
     return googleapiclient.discovery.build("youtube", "v3", credentials=creds)
