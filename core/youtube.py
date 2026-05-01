@@ -13,6 +13,8 @@ def get_authenticated_service(client_secrets_file: str):
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
     import googleapiclient.discovery
+    import httplib2
+    import google_auth_httplib2
 
     SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
     token_path = str(Path(client_secrets_file).parent / "token.json")
@@ -21,26 +23,35 @@ def get_authenticated_service(client_secrets_file: str):
     if Path(token_path).exists():
         creds = Credentials.from_authorized_user_file(token_path, SCOPES)
 
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(client_secrets_file, SCOPES)
-            flow.redirect_uri = "http://localhost:8080/"
-            auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline")
-            print("\n" + "=" * 60)
-            print("아래 URL을 브라우저에서 열고 Google 계정으로 허용하세요:")
-            print(auth_url)
-            print("=" * 60)
-            print("\n허용 후 브라우저가 localhost:8080 으로 이동하면서")
-            print("연결 실패 화면이 뜰 수 있습니다. 괜찮습니다.")
-            print("그 화면의 주소창 URL 전체를 복사해서 아래에 붙여넣으세요.\n")
-            redirect_response = input("리다이렉트 URL 붙여넣기: ").strip()
-            flow.fetch_token(authorization_response=redirect_response)
-            creds = flow.credentials
+    if creds and creds.valid:
+        pass
+    elif creds and creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+        Path(token_path).write_text(creds.to_json())
+    else:
+        flow = InstalledAppFlow.from_client_secrets_file(client_secrets_file, SCOPES)
+        flow.redirect_uri = "http://localhost:8080/"
+        auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline")
+        print("\n" + "=" * 60)
+        print("아래 URL을 브라우저에서 열고 Google 계정으로 허용하세요:")
+        print(auth_url)
+        print("=" * 60)
+        print("\n허용 후 브라우저 주소창 URL 전체를 붙여넣으세요.\n")
+        redirect_response = input("리다이렉트 URL 붙여넣기: ").strip()
+        flow.fetch_token(authorization_response=redirect_response)
+        creds = flow.credentials
         Path(token_path).write_text(creds.to_json())
 
-    return googleapiclient.discovery.build("youtube", "v3", credentials=creds)
+    # SSL 인증서 검증 비활성화 (서버 환경 자체 서명 인증서 우회)
+    http = httplib2.Http()
+    http.disable_ssl_certificate_validation = True
+    authed_http = google_auth_httplib2.AuthorizedHttp(creds, http=http)
+
+    return googleapiclient.discovery.build(
+        "youtube", "v3",
+        http=authed_http,
+        cache_discovery=False,
+    )
 
 
 def upload_short(
@@ -81,8 +92,7 @@ def upload_short(
     media = googleapiclient.http.MediaFileUpload(
         video_path,
         mimetype="video/mp4",
-        resumable=True,
-        chunksize=256 * 1024,
+        resumable=False,
     )
 
     request = youtube_service.videos().insert(
@@ -92,16 +102,13 @@ def upload_short(
     )
 
     print(f"  [YouTube] 업로드 시작: {title}")
-    response = None
     retry_count = 0
     max_retries = 4
+    response = None
 
     while response is None:
         try:
-            status, response = request.next_chunk()
-            if status:
-                pct = int(status.progress() * 100)
-                print(f"  [YouTube] 업로드 진행: {pct}%")
+            response = request.execute()
         except Exception as e:
             retry_count += 1
             if retry_count > max_retries:
